@@ -38,6 +38,7 @@ void setup(void)
 
 void loop(void)
 {
+    char tmp[100];
     //Serial.println("loop");
     if (digitalRead(SS) == LOW)
     {
@@ -75,7 +76,7 @@ void loop(void)
         
         switch (currentMode)
         {
-            case COMMAND:
+/*             case COMMAND:
                 
                 switch (currentCommand)
                 {
@@ -96,18 +97,26 @@ void loop(void)
                         break;
                 }
                 break;
+ */
             case SEND_DATA:
                 currentMode=IDLE;
+                sprintf(tmp,"Buffer has received %i bytes",byteCount);
+                debugOutput(tmp);            
+                debugOutput("Slave receive: ");
+                debugOutput(rx_buf);
                 break;
             case RECEIVE_DATA:
-                currentMode=IDLE;
+                debugOutput("Sending out tx_buffer ");
+                for(i=0;i<512;i++)
+                {
+                    rx_buf[i]=SPI.transfer((unsigned char)tx_buf[i]);
+                }
+                //currentMode=IDLE;
                 break;
             default:
                 break;
         }
-        // process_it            
-        debugOutput("Slave receive: ");
-        debugOutput(rx_buf);
+        // process_it
 
         process_it = false;
         ResetRxBuffer();    
@@ -122,63 +131,53 @@ ISR(SPI_STC_vect)
     //add to buffer if room
     if (byteCount < (int)(sizeof(rx_buf)))
     {
-        sprintf(tmp,"Buffer has space byteCount = %i, char = %i",byteCount,(int)c);
-        debugOutput(tmp);
+        //sprintf(tmp,"Buffer has space byteCount = %i, char = %i",byteCount,(int)c);
+        //debugOutput(tmp);
         if(byteCount==-1)
         {
-            /*
+            debugOutput("bytecount is -1, expecting command");
             //We receive the first byte so we have to interpret them as mode
             switch ((COMM_MODE)c)
             {
                 case COMM_MODE::SEND_DATA:
                     currentMode=COMM_MODE::SEND_DATA;
+                    debugOutput("Set Send_Mode");
                     break;
                 case COMM_MODE::RECEIVE_DATA:
+                    debugOutput("Set Receive_Mode");
                     currentMode=COMM_MODE::RECEIVE_DATA;
                     break;
                 default:
+                    debugOutput("Set Command_Mode");
                     currentMode=COMM_MODE::COMMAND;
                     break;
-            } */
+            } 
             // we receive the first byte after enable so we interprete them as command
             
-            switch ((DMX_COMMAND)c) 
-            {
-                case DMX_COMMAND::SET_SENDER_MODE:
-                    initDmxSender();
-                    break;
-                case DMX_COMMAND::SET_RECEIVER_MODE:
-                    initDmxReceiver();
-                    break;
-                case DMX_COMMAND::SET_DEBUG_MODE:
-                    toogleDebug();
-                    break;
-                case DMX_COMMAND::GET_BUFFER:
-                    sendBuffer();
-                    break;
-                default:
-                    initDmxSender();
-                    break;
-            }
-            pos=0;
-            byteCount=0;
+            //pos=0;
+            //byteCount=0;
             sprintf(tmp,"Command received: %i",(int)c);
             debugOutput(tmp);
         }
         else
         {
             //Collect the bytes into the Buffer for later processing or send the buffer
-            if(currentMode!= COMM_MODE::SEND_DATA)
+            switch(currentMode)
             {
-                rx_buf[byteCount] = c;
-                debugOutput(".");
+                case COMM_MODE::SEND_DATA:
+                    rx_buf[byteCount] = c;
+                    debugOutput(".");
+                    break;
+                case COMM_MODE::RECEIVE_DATA:
+                    SPI.transfer(tx_buf[byteCount]);
+                    debugOutput(",");
+                    break;
+                default:
+                    debugOutput("Byte received, no mode set.");
+                    break;   
             }
-            else
-            {
-                SPI.transfer(tx_buf[byteCount]);
-            }
-            byteCount++;
         }
+        byteCount++;
     }
     else
     {
