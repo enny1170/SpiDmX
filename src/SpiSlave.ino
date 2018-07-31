@@ -1,5 +1,6 @@
 #include <SPI.h>
 #include <helper.h>
+#include <DMXSerial.h>
 
 char rx_buf[512];
 char tx_buf[512];
@@ -10,6 +11,8 @@ volatile boolean process_it;
 volatile boolean enabled;
 volatile COMM_MODE currentMode;
 volatile DMX_COMMAND currentCommand;
+DMXSerialClass MYDMX;
+
 
 // Flag for marking Debug Mode. in case of debug we send debug data to serial port else we use it for dmx
 boolean DebugFlag=true;
@@ -18,11 +21,8 @@ void setup(void)
 {
     Serial.begin(115200); // debugging
     Serial.println("Setup Slave  Mode");
-
     pinMode(MISO, OUTPUT);
-    //pinMode(MOSI,INPUT);
     pinMode(SS, INPUT_PULLUP);
-
     //turn SPI in Slave-Mode
     SPCR |= bit(SPE);
     //get Ready for Interrupt
@@ -107,7 +107,7 @@ void loop(void)
                 break;
             case RECEIVE_DATA:
                 debugOutput("Sending out tx_buffer ");
-                for(i=0;i<512;i++)
+                for(int i=0;i<512;i++)
                 {
                     rx_buf[i]=SPI.transfer((unsigned char)tx_buf[i]);
                 }
@@ -140,8 +140,15 @@ ISR(SPI_STC_vect)
             switch ((COMM_MODE)c)
             {
                 case COMM_MODE::SEND_DATA:
-                    currentMode=COMM_MODE::SEND_DATA;
-                    debugOutput("Set Send_Mode");
+                    if(DebugFlag)
+                    {
+                        currentMode=COMM_MODE::SEND_DATA;
+                        debugOutput("Set Send_Mode");
+                    }
+                    else
+                    {
+                        initDmxSender();
+                    }
                     break;
                 case COMM_MODE::RECEIVE_DATA:
                     debugOutput("Set Receive_Mode");
@@ -165,8 +172,15 @@ ISR(SPI_STC_vect)
             switch(currentMode)
             {
                 case COMM_MODE::SEND_DATA:
-                    rx_buf[byteCount] = c;
-                    debugOutput(".");
+                    if(!DebugFlag)
+                    {
+                        MYDMX.write(byteCount,c);
+                    }
+                    else
+                    {
+                        rx_buf[byteCount] = c;
+                        debugOutput(".");
+                    }
                     break;
                 case COMM_MODE::RECEIVE_DATA:
                     SPI.transfer(tx_buf[byteCount]);
@@ -236,10 +250,18 @@ void debugOutput(unsigned char * data)
 
 void initDmxSender()
 {
-    currentMode=COMMAND;
-    currentCommand=SET_SENDER_MODE;
-    debugOutput("Set_Sender_Mode_Cmd..");
-    process_it=true;
+    if(!currentMode==DMXMode::SEND_DATA)
+    {
+        if(!DebugFlag)
+        {
+            MYDMX.init(DMXController);
+        }
+        else
+        {
+            debugOutput("Set_Sender_Mode_Cmd..");
+        }
+        currentMode=DMXMode::SEND_DATA;
+    }
 }
 
 void initDmxReceiver()
