@@ -1,6 +1,7 @@
+#include <DMXSerial.h>
 #include <SPI.h>
 #include <helper.h>
-#include <DMXSerial.h>
+#include <SoftwareSerial.h>
 
 char rx_buf[512];
 char tx_buf[512];
@@ -12,15 +13,15 @@ volatile boolean enabled;
 volatile COMM_MODE currentMode;
 volatile DMX_COMMAND currentCommand;
 DMXSerialClass MYDMX;
-
+SoftwareSerial debug(5,6); //RX, TX Pin
 
 // Flag for marking Debug Mode. in case of debug we send debug data to serial port else we use it for dmx
 boolean DebugFlag=true;
 
 void setup(void)
 {
-    Serial.begin(115200); // debugging
-    Serial.println("Setup Slave  Mode");
+    debug.begin(115200); // debugging
+    debug.println("Setup Slave  Mode");
     pinMode(MISO, OUTPUT);
     pinMode(SS, INPUT_PULLUP);
     //turn SPI in Slave-Mode
@@ -33,7 +34,7 @@ void setup(void)
     ResetTxBuffer();
     //turn on Interrupt
     SPI.attachInterrupt();
-    Serial.println("Interrupt attached");
+    debug.println("Interrupt attached");
 }
 
 void loop(void)
@@ -220,7 +221,7 @@ void debugOutput(const char * data)
 {
     if(DebugFlag)
     {
-        Serial.println(data);
+        debug.println(data);
     }
 }
 
@@ -228,7 +229,7 @@ void debugOutput(char * data)
 {
     if(DebugFlag)
     {
-        Serial.println(data);
+        debug.println(data);
     }
 }
 
@@ -236,7 +237,7 @@ void debugOutput(const unsigned char * data)
 {
     if(DebugFlag)
     {
-        Serial.println((char *)data);
+        debug.println((char *)data);
     }
 }
 
@@ -244,13 +245,13 @@ void debugOutput(unsigned char * data)
 {
     if(DebugFlag)
     {
-        Serial.println((char *)data);
+        debug.println((char *)data);
     }
 }
 
 void initDmxSender()
 {
-    if(!currentMode==DMXMode::SEND_DATA)
+    if(!currentMode==COMM_MODE::SEND_DATA)
     {
         if(!DebugFlag)
         {
@@ -260,7 +261,7 @@ void initDmxSender()
         {
             debugOutput("Set_Sender_Mode_Cmd..");
         }
-        currentMode=DMXMode::SEND_DATA;
+        currentMode=COMM_MODE::SEND_DATA;
     }
 }
 
