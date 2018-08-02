@@ -1,23 +1,31 @@
 #include <DMXSerial.h>
 #include <SPI.h>
-#include <helper.h>
+#include "helper.h"
 #include <SoftwareSerial.h>
 
+// #define WITH_BUFFER
+
+#if WITH_BUFFER
 char rx_buf[512];
 char tx_buf[512];
+#endif
 
-volatile byte pos;
 volatile int byteCount=0;
+char tmp[100];
+
 volatile boolean process_it;
+// holds the state of SPI Communication
 volatile boolean enabled;
+// hold the last set DMX Mode
 volatile COMM_MODE currentMode;
-volatile DMX_COMMAND currentCommand;
+// the debugFlag is used to enable debug output on the software serial line, can be changed by receive a DebugMode Flag
+volatile boolean debugFlag=false;
+// instance DMXSerial
 DMXSerialClass MYDMX;
+// instance SoftwareSerial for debugging, is only used if debugFlag set to true.
 SoftwareSerial debug(5,6); //RX, TX Pin
 
-// Flag for marking Debug Mode. in case of debug we send debug data to serial port else we use it for dmx
-boolean DebugFlag=true;
-
+// setup iss called one time during startup
 void setup(void)
 {
     debug.begin(115200); // debugging
@@ -28,7 +36,7 @@ void setup(void)
     SPCR |= bit(SPE);
     //get Ready for Interrupt
     enabled = false;
-    currentMode=RECEIVE_DATA;
+    currentMode=IDLE;
     process_it = false;
     ResetRxBuffer();
     ResetTxBuffer();
@@ -37,98 +45,102 @@ void setup(void)
     debug.println("Interrupt attached");
 }
 
+// main loop
 void loop(void)
 {
-    char tmp[100];
-    //Serial.println("loop");
-    if (digitalRead(SS) == LOW)
+    // check the SPI State
+    handleSSPin();
+    if (process_it)
     {
-        if (!enabled)
+        switch (currentMode)
         {
-            //last state was not enabled so we just enable
-            enabled = true;
-            //pinMode(MISO,OUTPUT);
-            //pinMode(MOSI,INPUT);
-            if(currentMode==IDLE)
-            {
-                //expecting a command
-                pos = -1;
-                byteCount=-1;
-            }
-            process_it=false;
-            debugOutput("Enable SPI");
+            case SEND_DATA:
+                // the transfer of bytes is done in the SPI ISR
+                // if the cycle over then reset mode to IDLE
+                // maybe we run into time problems with ISR 
+                if(!enabled)
+                {
+                    currentMode=IDLE;
+                    debugOutput("SendData processed.");
+                }
+                break;
+            case RECEIVE_DATA:
+                // the transfer will be handled in thes SPI ISR to avoid additional buffers
+                // if the cycle over then reset Mode to IDLE
+                if(!enabled)
+                {
+                    currentMode=IDLE;
+                    debugOutput("ReceiveData processed.");
+                }
+                break;
+            default:
+                // if the cycle over then reset Mode to IDLE
+                if(!enabled)
+                {
+                    currentMode=IDLE;
+                }
+                break;
+        }
+        // reset the process it flag
+        process_it = false;
+        // reset the byteCount
+        byteCount=-1;
+    }
+}
+
+// SPI interrupt service routine ISR
+ISR(SPI_STC_vect)
+{
+    byte c = SPDR; //grab byte from SPI Register
+    #ifndef WITH_BUFFER
+    // write and read directly to and from DMXSerial MYDMX
+    // is the SPI just enabled we expect the bytecounter is -1 and the 1 byte will set the mode
+    if(byteCount==-1)
+    {
+        switch (c)
+        {
+            case COMM_MODE::SEND_DATA:
+                initDmxSender();
+                break;
+            case COMM_MODE::RECEIVE_DATA:
+                initDmxReceiver();
+                break;
+            case COMM_MODE::DEBUG:
+                toogleDebug();
+                break;
+            default:
+                // do nothing
+                break;
         }
     }
     else
     {
-        if (enabled)
-        {
-            //last state was enabled so we disable
-            enabled = false;
-            //pinMode(MISO,INPUT);
-            //pinMode(MOSI,OUTPUT);
-            process_it=true;
-            debugOutput("Disable SPI");
-        }
-    }
-
-    if (process_it)
-    {
-        
         switch (currentMode)
         {
-/*             case COMMAND:
-                
-                switch (currentCommand)
-                {
-                    case SET_SENDER_MODE:
-                        currentMode=SEND_DATA;
-                        ResetRxBuffer();
-                        byteCount=0;
-                        break;
-                    case SET_RECEIVER_MODE:
-                        currentMode=RECEIVE_DATA;
-                        ResetTxBuffer();
-                        byteCount=0;
-                        break;
-                    case SET_DEBUG_MODE:
-                        break;
-                    default:
-                        currentMode=IDLE;
-                        break;
-                }
+            case COMM_MODE::SEND_DATA:
+                MYDMX.write(byteCount,c);
+                debugOutputWrite(byteCount,c);
                 break;
- */
-            case SEND_DATA:
-                currentMode=IDLE;
-                sprintf(tmp,"Buffer has received %i bytes",byteCount);
-                debugOutput(tmp);            
-                debugOutput("Slave receive: ");
-                debugOutput(rx_buf);
-                break;
-            case RECEIVE_DATA:
-                debugOutput("Sending out tx_buffer ");
-                for(int i=0;i<512;i++)
-                {
-                    rx_buf[i]=SPI.transfer((unsigned char)tx_buf[i]);
-                }
-                //currentMode=IDLE;
+            case COMM_MODE::RECEIVE_DATA:
+                c=MYDMX.read(byteCount);
+                SPDR=c;
+                debugOutputRead(byteCount,c);
                 break;
             default:
+                // do nothing
                 break;
         }
-        // process_it
-
-        process_it = false;
-        ResetRxBuffer();    
+        debugOutput(tmp);
     }
-}
+    byteCount=byteCount+1;
+    // prevent overrun. A DMX universe can only handle 512 channels
+    if(byteCount>511)
+    {
+        debugOutput("buffer > 511 reset them.");
+        byteCount=0;
+    }
 
-// SPI interrupt routine
-ISR(SPI_STC_vect)
-{
-    byte c = SPDR; //grab byte from SPI Register
-    char tmp[100];
+    #else
     //add to buffer if room
     if (byteCount < (int)(sizeof(rx_buf)))
     {
@@ -141,7 +153,7 @@ ISR(SPI_STC_vect)
             switch ((COMM_MODE)c)
             {
                 case COMM_MODE::SEND_DATA:
-                    if(DebugFlag)
+                    if(debugFlag)
                     {
                         currentMode=COMM_MODE::SEND_DATA;
                         debugOutput("Set Send_Mode");
@@ -173,7 +185,7 @@ ISR(SPI_STC_vect)
             switch(currentMode)
             {
                 case COMM_MODE::SEND_DATA:
-                    if(!DebugFlag)
+                    if(!debugFlag)
                     {
                         MYDMX.write(byteCount,c);
                     }
@@ -199,27 +211,92 @@ ISR(SPI_STC_vect)
         sprintf(tmp,"Buffer overrun byteCount = %i, sizeof(buff) = %i",byteCount,sizeof(rx_buf));
         debugOutput(tmp);
     }
+
+    #endif
 }
 
 void ResetRxBuffer(void)
 {
     //fill Array ith 0x00
+    #ifdef WITH_BUFFER
     memcpy(rx_buf,(char *) '0',sizeof(rx_buf));            
-    pos=-1;
+    #endif
     byteCount=-1;
 }
 
 void ResetTxBuffer(void)
 {
     //fill Array ith 0x00
+    #ifdef WITH_BUFFER
     memcpy(tx_buf,(char *) '0',sizeof(tx_buf));            
-    pos=-1;
+    #endif
     byteCount=-1;
 }
 
+
+void initDmxSender()
+{
+    currentMode=COMM_MODE::SEND_DATA;
+    MYDMX.init(DMXController);
+    debugOutput("Set_Sender_Mode_Cmd..");
+}
+
+void initDmxReceiver()
+{
+    currentMode=COMM_MODE::RECEIVE_DATA;
+    MYDMX.init(DMXReceiver);
+    debugOutput("Set_Receiver_Mode_Cmd..");
+}
+
+void toogleDebug()
+{
+    if(debugFlag)
+    {
+        debugFlag=false;
+    }
+    else
+    {
+        debugFlag=true;
+    }
+    debugOutput("Toggle_Debug_Flag_Cmd..");
+}
+
+
+// check this Slave is activated by the Master
+// each Communication Cycle will be started by the Master setting the SS-Pin to LOW 
+// and closed by set SS-Pin to High. This triggers also the processing in the main loop
+void handleSSPin()
+{
+    if (digitalRead(SS) == LOW)
+    {
+        if (!enabled)
+        {
+            // last state was not enabled so we just enable
+            enabled = true;
+            // now we expect to get 513 bytes from Master, the first one will be interpreted as command
+            // expecting a command
+            byteCount=-1;
+            // reset the process Flag
+            process_it=false;
+            debugOutput("Enable SPI");
+        }
+    }
+    else
+    {
+        if (enabled)
+        {
+            //last state was enabled so we disable
+            enabled = false;
+            process_it = true;
+            debugOutput("Disable SPI");
+        }
+    }
+}
+
+// some Helper Methods
 void debugOutput(const char * data)
 {
-    if(DebugFlag)
+    if(debugFlag)
     {
         debug.println(data);
     }
@@ -227,7 +304,7 @@ void debugOutput(const char * data)
 
 void debugOutput(char * data)
 {
-    if(DebugFlag)
+    if(debugFlag)
     {
         debug.println(data);
     }
@@ -235,7 +312,7 @@ void debugOutput(char * data)
 
 void debugOutput(const unsigned char * data)
 {
-    if(DebugFlag)
+    if(debugFlag)
     {
         debug.println((char *)data);
     }
@@ -243,50 +320,26 @@ void debugOutput(const unsigned char * data)
 
 void debugOutput(unsigned char * data)
 {
-    if(DebugFlag)
+    if(debugFlag)
     {
         debug.println((char *)data);
     }
 }
 
-void initDmxSender()
+void debugOutputWrite(int channel,uint8_t c)
 {
-    if(!currentMode==COMM_MODE::SEND_DATA)
+    if(debugFlag)
     {
-        if(!DebugFlag)
-        {
-            MYDMX.init(DMXController);
-        }
-        else
-        {
-            debugOutput("Set_Sender_Mode_Cmd..");
-        }
-        currentMode=COMM_MODE::SEND_DATA;
+        sprintf(tmp,"Channel (%i) set to value [%i]",channel,(int)c);
+        debug.println(tmp);
     }
 }
 
-void initDmxReceiver()
+void debugOutputRead(int channel,uint8_t c)
 {
-    currentMode=COMMAND;
-    currentCommand=SET_RECEIVER_MODE;
-    debugOutput("Set_Receiver_Mode_Cmd..");
-    process_it=true;
-}
-
-void toogleDebug()
-{
-    if(DebugFlag)
+    if(debugFlag)
     {
-        DebugFlag=false;
+        sprintf(tmp,"Channel (%i) get value [%i]",channel,(int)c);
+        debug.println(tmp);
     }
-    else
-    {
-        DebugFlag=true;
-    }
-    debugOutput("Toggle_Debug_Flag_Cmd..");
-}
-
-void sendBuffer()
-{
-
 }

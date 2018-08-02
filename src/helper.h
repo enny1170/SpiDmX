@@ -6,15 +6,8 @@ enum COMM_MODE
     SEND_DATA=0x01,
     RECEIVE_DATA=0x00,
     COMMAND=0x02,
-    IDLE=0x03
+    IDLE=0x03,
+    DEBUG=0x04
 } ;
-
-enum DMX_COMMAND
-{
-    SET_SENDER_MODE,
-    SET_RECEIVER_MODE,
-    SET_DEBUG_MODE,
-    GET_BUFFER
-};
 
 #endif
