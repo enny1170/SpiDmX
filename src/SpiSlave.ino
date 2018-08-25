@@ -4,7 +4,7 @@
 #include <SoftwareSerial.h>
 
 //#define WITH_BUFFER
-#define SPI_ENABLE_INTERRUPT
+//#define SPI_ENABLE_INTERRUPT
 #ifdef SPI_ENABLE_INTERRUPT
     #define SPI_INTERRUPT_PIN 3
 #endif
@@ -26,7 +26,7 @@ volatile boolean enabled;
 // hold the last set DMX Mode
 volatile COMM_MODE currentMode;
 // the debugFlag is used to enable debug output on the software serial line, can be changed by receive a DebugMode Flag
-volatile boolean debugFlag=false;
+volatile boolean debugFlag=true;
 
 // instance SoftwareSerial for debugging, is only used if debugFlag set to true.
 SoftwareSerial debug(5,6); //RX, TX Pin
@@ -148,9 +148,12 @@ ISR(SPI_STC_vect)
         DMXSerial.write(byteCount+1,c);
         // Read Next byte from DMX
         SPDR=DMXSerial.read(byteCount+2);
-        debug.print((int)c);
-        debug.print(" - ");
-        debug.println(byteCount);
+        // if(byteCount>-1 && byteCount<7)
+        // {
+        //     debug.print((int)c);
+        //     debug.print(" - ");
+        //     debug.println(byteCount);
+        // }
 /*         switch (currentMode)
         {
             case COMM_MODE::SEND_DATA:
@@ -322,7 +325,7 @@ void handleSSPin()
             process_it=false;
             // store the first value in SPDR
             SPDR=DMXSerial.read(1);
-            debugOutput("Enable SPI");
+            //debugOutput("Enable SPI");
         }
     }
     else
@@ -332,7 +335,7 @@ void handleSSPin()
             //last state was enabled so we disable
             enabled = false;
             process_it = true;
-            debugOutput("Disable SPI");
+            //debugOutput("Disable SPI");
         }
     }
 }
